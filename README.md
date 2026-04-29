@@ -94,7 +94,7 @@ install.packages(c(
 
 ```r
 # From GitHub · 从 GitHub 安装
-devtools::install_github("yourname/LLM_EnrichViz")
+devtools::install_github("Computational-Biology-Tools/LLM_EnrichViz")
 ```
 
 ---
