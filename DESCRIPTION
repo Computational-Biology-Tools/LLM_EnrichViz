@@ -55,6 +55,6 @@ Suggests:
     testthat (>= 3.0.0),
     withr
 VignetteBuilder: knitr
-URL: https://github.com/yourname/LLM_EnrichViz
-BugReports: https://github.com/yourname/LLM_EnrichViz/issues
+URL: https://github.com/Computational-Biology-Tools/LLM_EnrichViz
+BugReports: https://github.com/Computational-Biology-Tools/LLM_EnrichViz/issues
 Config/testthat/edition: 3

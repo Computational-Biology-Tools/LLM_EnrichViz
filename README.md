@@ -94,7 +94,7 @@ install.packages(c(
 
 ```r
 # From GitHub · 从 GitHub 安装
-devtools::install_github("yourname/LLM_EnrichViz")
+pak::pak("Computational-Biology-Tools/LLM_EnrichViz")
 ```
 
 ---
@@ -330,7 +330,7 @@ devtools::check()
 ```
 Your Name (2024). LLM_EnrichViz: LLM-Powered Multi-Method Gene Set
 Enrichment Analysis and Visualization. R package version 0.1.0.
-https://github.com/yourname/LLM_EnrichViz
+https://github.com/Computational-Biology-Tools/LLM_EnrichViz
 ```
 
 ---
