@@ -1,0 +1,384 @@
+---
+title: "LLM_EnrichViz: LLM-Powered Multi-Method Gene Set Enrichment Analysis"
+author: "Your Name"
+date: "`r Sys.Date()`"
+output:
+  BiocStyle::html_document:
+    toc: true
+    toc_depth: 3
+    number_sections: true
+vignette: >
+  %\VignetteIndexEntry{LLM_EnrichViz: LLM-Powered Multi-Method Gene Set Enrichment Analysis}
+  %\VignetteEngine{knitr::rmarkdown}
+  %\VignetteEncoding{UTF-8}
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+  collapse = TRUE,
+  comment  = "#>",
+  eval     = FALSE   # set to TRUE only in interactive use (requires API key)
+)
+```
+
+# Introduction
+
+**LLM_EnrichViz** is an R package that integrates four complementary gene set
+enrichment methods — ORA, GSEA, GSVA, and ROAST — with Large Language Models
+(LLMs). Each analysis is independently performed and then interpreted by a
+dedicated LLM agent. A final orchestrator LLM synthesises all agent responses
+into a unified mechanistic model with cross-method confidence levels, an
+interactive network, and an HTML report.
+
+## Why four methods?
+
+| Method | Input | Key strength |
+|--------|-------|-------------|
+| **ORA** | DEG list | Fast; interpretable threshold-based test |
+| **GSEA** | Ranked gene list | Captures sub-threshold coordinated signals; NES gives direction |
+| **GSVA** | Full expression matrix | Sample-level pathway scores; reveals cohort heterogeneity |
+| **ROAST** | Full expression matrix + design | Directional coordination; robust to within-set gene correlation |
+
+Using all four methods together increases biological confidence: a pathway
+supported by every method is far more reliable than one detected by a single
+approach.
+
+## Supported LLM providers
+
+| Provider | Models | Environment variable |
+|----------|--------|----------------------|
+| Google Gemini | `gemini-1.5-flash-latest`, `gemini-1.5-pro-latest` | `GEMINI_API_KEY` |
+| OpenAI | `gpt-4o`, `gpt-4-turbo`, `gpt-3.5-turbo` | `OPENAI_API_KEY` |
+| Anthropic Claude | `claude-opus-4-6`, `claude-sonnet-4-6`, `claude-haiku-4-5-20251001` | `ANTHROPIC_API_KEY` |
+| DeepSeek | `deepseek-chat`, `deepseek-reasoner` | `DEEPSEEK_API_KEY` |
+
+---
+
+# Installation
+
+## From GitHub (development version)
+
+```{r install-github}
+if (!requireNamespace("remotes", quietly = TRUE))
+  install.packages("remotes")
+
+remotes::install_github("yourname/LLM_EnrichViz")
+```
+
+## Bioconductor dependencies
+
+```{r install-bioc}
+if (!requireNamespace("BiocManager", quietly = TRUE))
+  install.packages("BiocManager")
+
+BiocManager::install(c(
+  "clusterProfiler",
+  "ReactomePA",
+  "GSVA",
+  "limma",
+  "org.Hs.eg.db",   # for human
+  "org.Mm.eg.db"    # for mouse
+))
+```
+
+---
+
+# Quick Start
+
+## Minimal example: ORA only
+
+This example requires only a list of significant DEG symbols and an API key.
+
+```{r quickstart-ora}
+library(LLM_EnrichViz)
+
+# Write your API key to a file (one line, no quotes)
+writeLines(Sys.getenv("ANTHROPIC_API_KEY"), "~/.claude_key")
+
+LLM_EnrichViz(
+  deg_list            = c("TP53", "MYC", "EGFR", "CDKN1A", "BCL2",
+                          "CCND1", "MDM2", "RB1", "E2F1", "CDK4"),
+  gene_type           = "SYMBOL",
+  organism            = "human",
+  analyses            = "ORA",
+  databases           = c("KEGG", "GO"),
+  llm_provider        = "claude",
+  llm_model           = "claude-sonnet-4-6",
+  api_key_file        = "~/.claude_key",
+  experimental_design = "Colon cancer vs normal tissue, bulk RNA-Seq, n=30",
+  output_dir          = "results_ora_only"
+)
+```
+
+Results are written to `results_ora_only/`:
+
+```
+results_ora_only/
+├── run_parameters.txt
+├── ORA_KEGG_results.txt
+├── ORA_GO_BP_results.txt
+├── ORA_KEGG_barplot.pdf
+├── ORA_GO_BP_barplot.pdf
+├── agent_responses.txt
+├── final_response.txt
+├── integrated_network.html
+└── report_template.html
+```
+
+---
+
+# Full Pipeline
+
+## Preparing input data
+
+### From DESeq2
+
+```{r deseq2-input}
+library(DESeq2)
+
+# Assuming 'dds' is your DESeqDataSet
+res       <- DESeq2::results(dds)
+res_df    <- as.data.frame(res)
+res_df    <- res_df[!is.na(res_df$padj), ]
+
+# ORA: significant DEGs
+deg_list  <- rownames(res_df[res_df$padj < 0.05 & abs(res_df$log2FoldChange) > 1, ])
+
+# GSEA: all genes ranked by Wald statistic (signed, decreasing)
+ranked_list <- res_df$stat
+names(ranked_list) <- rownames(res_df)
+ranked_list <- sort(ranked_list[!is.na(ranked_list)], decreasing = TRUE)
+
+# GSVA / ROAST: normalised count matrix
+expr_matrix <- DESeq2::vst(dds, blind = FALSE) |> SummarizedExperiment::assay()
+
+# Design matrix for ROAST
+design_mat  <- model.matrix(~ condition, data = colData(dds))
+contrast_v  <- c(0, 1)  # test the second coefficient
+```
+
+### From Seurat (single-cell)
+
+```{r seurat-input}
+library(Seurat)
+
+# After FindMarkers()
+markers <- FindMarkers(seurat_obj, ident.1 = "Tumour", ident.2 = "Normal")
+
+# ORA
+deg_list    <- rownames(markers[markers$p_val_adj < 0.05 &
+                                  abs(markers$avg_log2FC) > 0.5, ])
+
+# GSEA (rank by avg_log2FC * -log10(p_val))
+markers$rank_stat <- markers$avg_log2FC * (-log10(markers$p_val + 1e-300))
+ranked_list       <- sort(setNames(markers$rank_stat, rownames(markers)),
+                          decreasing = TRUE)
+
+# Pseudo-bulk expression for GSVA / ROAST
+expr_matrix <- AggregateExpression(seurat_obj, group.by = "sample_id",
+                                    assays = "RNA")$RNA
+```
+
+## Running the full pipeline
+
+```{r full-pipeline}
+LLM_EnrichViz(
+  # Inputs
+  expression_data     = expr_matrix,
+  ranked_list         = ranked_list,
+  deg_list            = deg_list,
+  gene_type           = "SYMBOL",
+  organism            = "human",
+
+  # ROAST design
+  design_matrix       = design_mat,
+  contrast_vector     = contrast_v,
+
+  # Methods and databases
+  analyses            = c("ORA", "GSEA", "GSVA", "ROAST"),
+  databases           = c("KEGG", "GO", "Reactome", "WikiPathways"),
+
+  # LLM settings
+  llm_provider        = "openai",
+  llm_model           = "gpt-4o",
+  api_key_file        = "~/.openai_key",
+  temperature         = 0,
+
+  # Experiment context
+  experimental_design = paste(
+    "PBMC from 20 COVID-19 patients (WHO severity 3–5) vs 20 healthy",
+    "donors; paired-end bulk RNA-Seq; 50 M reads/sample."
+  ),
+
+  output_dir          = "results_covid_pbmc"
+)
+```
+
+---
+
+# Switching LLM Providers
+
+The `llm_provider` and `llm_model` arguments control which LLM is used for
+**all** agents and the final synthesis. You can switch without changing
+anything else.
+
+```{r providers}
+# Google Gemini
+LLM_EnrichViz(
+  ...,
+  llm_provider = "gemini",
+  llm_model    = "gemini-1.5-pro-latest",
+  api_key_file = "~/.gemini_key"
+)
+
+# OpenAI GPT-4o
+LLM_EnrichViz(
+  ...,
+  llm_provider = "openai",
+  llm_model    = "gpt-4o",
+  api_key_file = "~/.openai_key"
+)
+
+# Anthropic Claude
+LLM_EnrichViz(
+  ...,
+  llm_provider = "claude",
+  llm_model    = "claude-sonnet-4-6",
+  api_key_file = "~/.anthropic_key"
+)
+
+# DeepSeek
+LLM_EnrichViz(
+  ...,
+  llm_provider = "deepseek",
+  llm_model    = "deepseek-chat",
+  api_key_file = "~/.deepseek_key"
+)
+```
+
+---
+
+# Understanding the Output
+
+## Agent responses (`agent_responses.txt`)
+
+Each agent corresponds to one (method × database) combination. For a run with
+ORA + GSEA on KEGG + GO, there are 4 agents. Responses include:
+
+- Summary and categorisation of enriched terms
+- Hub gene identification (step-by-step reasoning)
+- Method-specific insights (NES for GSEA, direction for ROAST, etc.)
+- A TSV system-representation network
+
+## Final synthesis (`final_response.txt`)
+
+The orchestrator LLM produces:
+
+1. **Cross-method convergence table** — pathways ranked by how many methods detected them
+2. **Complementary insights** — what each method contributed uniquely
+3. **Multi-method hub genes** — ranked by number of supporting methods
+4. **Integrated mechanistic model**
+5. **Confidence-annotated network** (TSV with Confidence_Level 1–4)
+6. **10-word title** including the top hub gene
+
+## Interactive network (`integrated_network.html`)
+
+Nodes coloured by type (Gene = blue, Process/pathway = orange). Click any node
+to highlight its neighbours. Filter by group using the dropdown.
+
+---
+
+# Advanced Usage
+
+## Running individual analyses
+
+Each enrichment function can be called independently:
+
+```{r advanced-individual}
+gene_mapping <- map_gene_ids_enrichviz(
+  deg_list  = deg_list,
+  gene_type = "SYMBOL",
+  organism  = "human"
+)
+
+# ORA only
+ora_results <- run_ORA(
+  gene_ids     = gene_mapping$ENTREZID,
+  gene_mapping = gene_mapping,
+  organism     = "human",
+  databases    = c("KEGG", "Reactome"),
+  pvalue       = 0.01,
+  output_dir   = "my_results"
+)
+
+# GSEA only
+gsea_results <- run_GSEA(
+  ranked_list  = ranked_list,
+  gene_mapping = gene_mapping,
+  gene_type    = "SYMBOL",
+  organism     = "human",
+  databases    = c("GO", "WikiPathways"),
+  pvalue       = 0.05,
+  output_dir   = "my_results"
+)
+```
+
+## Running LLM helpers per analysis
+
+Use the short helpers to run the LLM loop on a single method's results:
+
+```{r advanced-llm-helpers}
+llm_gsea <- LLM_GSEA(
+  enrichment_results = gsea_results,
+  gene_symbols       = unique(gene_mapping$SYMBOL),
+  llm_provider       = "openai",
+  api_key_file       = "~/.openai_key",
+  output_dir         = "my_results"
+)
+```
+
+## Using individual LLM functions directly
+
+```{r advanced-llm}
+prompt <- "Summarise the role of TP53 in apoptosis in 3 sentences."
+
+# Claude
+response <- make_claude_request(
+  prompt            = prompt,
+  temperature       = 0,
+  max_output_tokens = 512,
+  api_key           = readLines("~/.anthropic_key"),
+  llm_model         = "claude-sonnet-4-6",
+  delay_seconds     = 2
+)
+cat(response)
+```
+
+## Retrieving gene sets
+
+```{r advanced-genesets}
+gene_sets <- get_gene_sets(
+  databases = c("KEGG", "Reactome"),
+  organism  = "human"
+)
+# gene_sets$KEGG is a named list of character vectors
+length(gene_sets$KEGG)
+head(names(gene_sets$KEGG))
+```
+
+---
+
+# Reproducibility Notes
+
+- Set `temperature = 0` for deterministic LLM responses.
+- Save `run_parameters.txt` (written automatically) for exact reproducibility.
+- LLM responses may vary across model versions; pin `llm_model` explicitly.
+- For ROAST, set a fixed seed before running: `set.seed(42)`.
+
+---
+
+# Session Info
+
+```{r session, eval=TRUE}
+sessionInfo()
+```

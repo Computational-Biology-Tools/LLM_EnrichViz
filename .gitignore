@@ -1,0 +1,13 @@
+.Rproj.user
+.Rhistory
+.Rdata
+.DS_Store
+*.Rproj
+inst/doc
+/doc/
+/Meta/
+*.html
+!inst/rmd/*.Rmd
+enrichviz_results/
+*_results/
+*.log

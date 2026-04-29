@@ -1,0 +1,60 @@
+Package: LLM_EnrichViz
+Title: LLM-Powered Multi-Method Enrichment Analysis and Visualization
+Version: 0.1.0
+Authors@R: c(
+    person("Your", "Name", email = "your.email@example.com",
+           role = c("aut", "cre"),
+           comment = c(ORCID = "0000-0000-0000-0000"))
+  )
+Description: Performs comprehensive gene set enrichment analyses using four
+    complementary methods: ORA (Over-Representation Analysis), GSEA (Gene Set
+    Enrichment Analysis), GSVA (Gene Set Variation Analysis), and ROAST
+    (Rotation-based gene set testing). Each analysis is independently
+    interpreted by a Large Language Model (LLM) chosen from Gemini, OpenAI
+    (GPT), Anthropic (Claude), or DeepSeek. A multi-agent system collects
+    per-method insights and synthesizes them into an integrated mechanistic
+    model with network visualization and an automated HTML report.
+License: MIT + file LICENSE
+Encoding: UTF-8
+Roxygen: list(markdown = TRUE)
+RoxygenNote: 7.3.1
+biocViews: GeneSetEnrichment, Pathways, RNASeq, Transcriptomics,
+    Visualization, Network
+Depends:
+    R (>= 4.2.0)
+Imports:
+    clusterProfiler (>= 4.0.0),
+    ReactomePA (>= 1.40.0),
+    GSVA (>= 1.44.0),
+    limma (>= 3.52.0),
+    msigdbr (>= 7.5.1),
+    httr (>= 1.4.4),
+    R6 (>= 2.5.1),
+    future (>= 1.27.0),
+    furrr (>= 0.3.1),
+    progressr (>= 0.11.0),
+    dplyr (>= 1.1.0),
+    tidyr (>= 1.2.0),
+    ggplot2 (>= 3.4.0),
+    visNetwork (>= 2.1.2),
+    stringr (>= 1.5.0),
+    rmarkdown (>= 2.18),
+    tibble (>= 3.1.8),
+    methods,
+    parallel,
+    stats,
+    utils
+Suggests:
+    org.Hs.eg.db,
+    org.Mm.eg.db,
+    BiocManager,
+    enrichplot,
+    cowplot,
+    ggrepel,
+    knitr,
+    testthat (>= 3.0.0),
+    withr
+VignetteBuilder: knitr
+URL: https://github.com/yourname/LLM_EnrichViz
+BugReports: https://github.com/yourname/LLM_EnrichViz/issues
+Config/testthat/edition: 3

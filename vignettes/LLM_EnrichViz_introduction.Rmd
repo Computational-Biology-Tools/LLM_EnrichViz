@@ -1,0 +1,430 @@
+---
+title: "Introduction to LLM_EnrichViz"
+author: "Your Name"
+date: "`r Sys.Date()`"
+output:
+  rmarkdown::html_vignette:
+    toc: true
+    toc_depth: 3
+    number_sections: true
+vignette: >
+  %\VignetteIndexEntry{Introduction to LLM_EnrichViz}
+  %\VignetteEngine{knitr::rmarkdown}
+  %\VignetteEncoding{UTF-8}
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+  collapse = TRUE,
+  comment  = "#>",
+  eval     = FALSE   # set to TRUE only when API keys are available
+)
+```
+
+# Overview
+
+**LLM_EnrichViz** is an R package that bridges quantitative gene set enrichment
+statistics with the interpretive power of Large Language Models (LLMs).  It
+runs four complementary enrichment methods on your transcriptomic data and
+dispatches each result to an independent LLM agent for biological interpretation.
+A final synthesising LLM call integrates all agent outputs into a unified
+mechanistic model, a confidence-ranked pathway list, and an interactive network
+visualisation.
+
+## Key features
+
+| Feature | Description |
+|---------|-------------|
+| **Four enrichment methods** | ORA, GSEA, GSVA, ROAST |
+| **Multiple pathway databases** | KEGG, GO, Reactome, WikiPathways |
+| **Four LLM providers** | Gemini, OpenAI (GPT), Anthropic (Claude), DeepSeek |
+| **Multi-agent parallelism** | All (method × database) pairs run simultaneously |
+| **Cross-method integration** | Confidence tiers based on method convergence |
+| **Interactive visualisation** | `visNetwork` HTML network |
+| **Automated report** | Self-contained HTML via RMarkdown |
+
+---
+
+# Installation
+
+## From GitHub
+
+```{r install-github}
+if (!requireNamespace("devtools", quietly = TRUE))
+  install.packages("devtools")
+devtools::install_github("yourname/LLM_EnrichViz")
+```
+
+## Bioconductor dependencies
+
+```{r install-bioc}
+if (!requireNamespace("BiocManager", quietly = TRUE))
+  install.packages("BiocManager")
+
+BiocManager::install(c(
+  "clusterProfiler",
+  "ReactomePA",
+  "GSVA",
+  "limma",
+  "org.Hs.eg.db",   # human
+  "org.Mm.eg.db"    # mouse
+))
+```
+
+## CRAN dependencies
+
+```{r install-cran}
+install.packages(c(
+  "msigdbr", "httr", "R6", "future", "furrr",
+  "progressr", "dplyr", "tidyr", "ggplot2",
+  "visNetwork", "stringr", "rmarkdown", "tibble"
+))
+```
+
+---
+
+# Quick-start examples
+
+## Example 1 — ORA only (simplest case)
+
+This example requires only a list of differentially expressed genes.
+
+```{r example-ora}
+library(LLM_EnrichViz)
+
+# A short list of human DEGs (gene symbols)
+deg_list <- c(
+  "TP53", "MYC", "BRCA1", "EGFR", "VEGFA", "CDK2", "MDM2",
+  "BCL2", "PTEN", "RB1", "AKT1", "STAT3", "NFkB1", "CCND1"
+)
+
+LLM_EnrichViz(
+  deg_list            = deg_list,
+  gene_type           = "SYMBOL",
+  organism            = "human",
+  analyses            = "ORA",
+  databases           = c("KEGG", "GO"),
+  pvalue              = 0.05,
+  ont                 = "BP",
+  llm_provider        = "openai",
+  llm_model           = "gpt-4o",
+  api_key_file        = "~/.openai_key",     # one line: your API key
+  experimental_design = "Breast cancer cell line vs normal, bulk RNA-Seq",
+  output_dir          = "ora_results"
+)
+```
+
+Results are written to `ora_results/`:
+
+```
+ora_results/
+├── ORA_KEGG_results.txt
+├── ORA_GO_results.txt
+├── ORA_KEGG_barplot.pdf
+├── ORA_GO_barplot.pdf
+├── agent_responses.txt
+├── final_response.txt
+├── integrated_network.html
+└── report_template.html
+```
+
+## Example 2 — GSEA with a ranked gene list
+
+GSEA requires all genes ranked by a continuous statistic (Wald statistic,
+log2FC, signed -log10 p-value, etc.).
+
+```{r example-gsea}
+library(LLM_EnrichViz)
+
+# Build a ranked list from DESeq2 results
+# (assuming `deseq_res` is a DESeqResults object)
+ranked_list <- deseq_res$stat               # Wald statistics
+names(ranked_list) <- rownames(deseq_res)   # SYMBOL or ENSEMBL
+ranked_list <- sort(ranked_list, decreasing = TRUE)
+# Remove NA values
+ranked_list <- ranked_list[!is.na(ranked_list)]
+
+LLM_EnrichViz(
+  ranked_list         = ranked_list,
+  gene_type           = "SYMBOL",
+  organism            = "human",
+  analyses            = "GSEA",
+  databases           = c("KEGG", "Reactome"),
+  pvalue              = 0.05,
+  llm_provider        = "claude",
+  llm_model           = "claude-sonnet-4-6",
+  api_key_file        = "~/.claude_key",
+  experimental_design = "PBMC: lupus vs healthy, bulk RNA-Seq, n=50",
+  output_dir          = "gsea_results"
+)
+```
+
+## Example 3 — GSVA + ROAST (matrix-based methods)
+
+GSVA and ROAST both require the full expression matrix.
+
+```{r example-gsva-roast}
+library(LLM_EnrichViz)
+library(limma)
+
+# expr_matrix : normalised log2 CPM matrix (genes x samples)
+# sample_info : data frame with a 'condition' column ("case" / "control")
+
+design <- model.matrix(~ condition, data = sample_info)
+contrast <- c(0, 1)   # test 'conditioncase'
+
+LLM_EnrichViz(
+  expression_data     = expr_matrix,
+  deg_list            = sig_genes,       # for ORA as well
+  ranked_list         = rank_vec,        # for GSEA as well
+  gene_type           = "SYMBOL",
+  organism            = "human",
+  design_matrix       = design,
+  contrast_vector     = contrast,
+  analyses            = c("ORA", "GSEA", "GSVA", "ROAST"),
+  databases           = c("KEGG", "GO", "Reactome"),
+  pvalue              = 0.05,
+  llm_provider        = "gemini",
+  llm_model           = "gemini-1.5-flash-latest",
+  api_key_file        = "~/.gemini_key",
+  experimental_design = "Uveitis vs healthy controls, PBMC, bulk RNA-Seq",
+  output_dir          = "full_analysis"
+)
+```
+
+## Example 4 — Using DeepSeek
+
+```{r example-deepseek}
+LLM_EnrichViz(
+  deg_list     = deg_list,
+  gene_type    = "SYMBOL",
+  organism     = "mouse",
+  analyses     = c("ORA", "GSEA"),
+  databases    = c("KEGG", "GO"),
+  llm_provider = "deepseek",
+  llm_model    = "deepseek-chat",
+  api_key_file = "~/.deepseek_key",
+  output_dir   = "mouse_analysis"
+)
+```
+
+---
+
+# Method details
+
+## ORA — Over-Representation Analysis
+
+ORA applies a **hypergeometric (Fisher's exact) test** to ask: given a
+background gene universe, are members of a gene set over-represented among
+the DEGs?
+
+**Strengths:** simple, fast, widely used, easy to interpret.  
+**Limitations:** discards expression magnitude; sensitive to the significance
+threshold used to define DEGs; gene sets with many members have an inherent
+advantage.
+
+**Required input:** `deg_list` — a character vector of significant gene IDs.
+
+**Key output columns:**
+
+| Column | Meaning |
+|--------|---------|
+| `Description` | Gene set name |
+| `pvalue` | Hypergeometric p-value |
+| `qvalue` | BH-adjusted p-value |
+| `Count` | Overlap size |
+| `Gene` | Overlapping gene symbols |
+
+## GSEA — Gene Set Enrichment Analysis
+
+GSEA uses the **full ranked gene list** to compute a running enrichment
+score (ES) by walking from the highest- to lowest-ranked gene and noting
+when set members are encountered.  The ES peak is the enrichment score;
+statistical significance is assessed by permutation (or by the preranked
+approach here).
+
+**Strengths:** uses the entire dataset; captures subtle coordinated shifts
+that ORA misses; directional (NES > 0 = activated, NES < 0 = repressed).  
+**Limitations:** sensitive to ranking metric choice; slow for very large
+databases.
+
+**Required input:** `ranked_list` — a **named, sorted** numeric vector.
+
+**Key output columns:**
+
+| Column | Meaning |
+|--------|---------|
+| `NES` | Normalised enrichment score |
+| `enrichmentScore` | Raw ES |
+| `pvalue` | Permutation p-value |
+| `Gene` | Leading-edge (core enrichment) genes |
+
+## GSVA — Gene Set Variation Analysis
+
+GSVA transforms the expression matrix into a **gene set score matrix**
+(gene sets × samples), enabling pathway-level differential analysis and the
+study of **inter-sample heterogeneity** in pathway activity.
+
+**Strengths:** sample-level resolution; detects sub-population differences;
+compatible with standard differential expression frameworks (limma/edgeR).  
+**Limitations:** scores are relative and not directly comparable across
+different datasets; computationally heavier than ORA/GSEA.
+
+**Required input:** `expression_data` — a numeric matrix (genes × samples).
+
+**Key output columns:**
+
+| Column | Meaning |
+|--------|---------|
+| `GeneSet` | Gene set name |
+| `MeanScore` | Mean GSVA score across samples |
+| `SDScore` | Standard deviation (inter-sample variability) |
+| `Genes` | Genes in the set present in expression data |
+
+## ROAST — Rotation-based Gene Set Testing
+
+ROAST uses **random rotations of residuals** to test whether genes in a
+set show coordinated differential expression beyond what is expected by
+chance.  Unlike competitive methods (ORA, GSEA), ROAST is a **self-contained
+test** — it does not compare to a background.
+
+**Strengths:** accounts for intra-set gene correlations; directional
+(Up/Down/Mixed); robust to small sample sizes.  
+**Limitations:** requires a design matrix and contrast; computationally
+intensive (1 000 rotations by default).
+
+**Required inputs:** `expression_data`, `design_matrix`, `contrast_vector`.
+
+**Key output columns:**
+
+| Column | Meaning |
+|--------|---------|
+| `GeneSet` | Gene set name |
+| `PValue` | Rotation-based p-value |
+| `Direction` | Up / Down / Mixed |
+| `Genes` | Member genes found in expression data |
+
+---
+
+# LLM Providers
+
+## Setting up API keys
+
+Each provider requires its own API key, stored in a plain-text file
+(one key per line; only the first line is read):
+
+```bash
+# Gemini
+echo "AIza..." > ~/.gemini_key
+
+# OpenAI
+echo "sk-..." > ~/.openai_key
+
+# Claude (Anthropic)
+echo "sk-ant-..." > ~/.claude_key
+
+# DeepSeek
+echo "sk-..." > ~/.deepseek_key
+```
+
+## Provider comparison
+
+| Provider | Speed | Cost | Strengths |
+|----------|-------|------|-----------|
+| **Gemini 1.5 Flash** | Fast | Low | Large context window, fast iteration |
+| **GPT-4o** | Medium | Medium | Strong reasoning, reliable JSON |
+| **Claude Sonnet** | Fast | Medium | Long context, nuanced interpretation |
+| **DeepSeek Chat** | Fast | Very low | Cost-effective, scientific reasoning |
+
+## Changing the model
+
+```{r model-select}
+# Use a more capable model for the final synthesis step
+LLM_EnrichViz(
+  ...,
+  llm_provider = "openai",
+  llm_model    = "gpt-4o",   # or "gpt-4-turbo", "o1-preview", etc.
+  temperature  = 0           # 0 = deterministic, 1 = creative
+)
+```
+
+---
+
+# Output files
+
+After a complete run, `output_dir` contains:
+
+| File | Description |
+|------|-------------|
+| `ORA_{DB}_results.txt` | ORA filtered results per database |
+| `GSEA_{DB}_results.txt` | GSEA filtered results per database |
+| `GSVA_{DB}_summary.txt` | GSVA score summary per database |
+| `GSVA_{DB}_scores_matrix.txt` | Full GSVA score matrix |
+| `ROAST_{DB}_results.txt` | ROAST results per database |
+| `ORA_{DB}_barplot.pdf` | ORA bar chart |
+| `GSEA_{DB}_bubble.pdf` | GSEA bubble plot |
+| `GSVA_{DB}_heatmap.pdf` | GSVA heatmap |
+| `ROAST_{DB}_barplot.pdf` | ROAST bar chart |
+| `agent_responses.txt` | Raw LLM agent responses |
+| `final_response.txt` | Integrated LLM synthesis |
+| `integrated_network.html` | Interactive visNetwork graph |
+| `analysis_parameters.txt` | Run configuration |
+| `report_template.html` | Self-contained HTML report |
+
+---
+
+# Interpreting the integrated network
+
+The interactive network (`integrated_network.html`) is built from the TSV
+block in the LLM's final integration response.  Each node is coloured by type:
+
+- **Orange nodes** — genes (DEGs or hub genes)
+- **Blue nodes** — pathways, GO terms, or processes
+
+Edge labels indicate the relationship type: *activates*, *represses*,
+*associated with*, *targets*.
+
+**Confidence tiers** (shown in edge tooltips):
+- **Tier 1** (highest): gene set detected by 4 methods
+- **Tier 2**: detected by 3 methods
+- **Tier 3**: detected by 2 methods
+- **Tier 4** (lowest): detected by 1 method
+
+---
+
+# Frequently asked questions
+
+**Q: Can I run a single method without providing data for others?**  
+A: Yes.  Set `analyses = "ORA"` (or any subset) and only provide the required
+inputs for that method.  Missing data for other methods generates a warning
+and the method is skipped.
+
+**Q: What gene identifier types are supported?**  
+A: `SYMBOL`, `ENSEMBL`, and `ENTREZID`.  ENSEMBL version suffixes
+(e.g., `ENSG00000139618.12`) are stripped automatically.
+
+**Q: My GSEA ranked list has ENSEMBL IDs, not symbols.  Is that OK?**  
+A: Yes — set `gene_type = "ENSEMBL"` and LLM_EnrichViz will map all inputs
+to ENTREZID/SYMBOL internally.
+
+**Q: The LLM returns an error (503 / rate limit). What happens?**  
+A: Each agent automatically retries up to 3 times with a doubled sleep
+interval.  After max retries, the agent records a failure and the pipeline
+continues with the remaining agents.
+
+**Q: Can I use a custom pathway database?**  
+A: Not directly through the main function yet.  The `get_gene_sets()`
+function can be extended to include custom MSigDB collections or user-defined
+gene set lists.
+
+**Q: How long does a full run take?**  
+A: A typical run with 4 methods × 3 databases = 12 agents takes 5–15 minutes
+depending on LLM response times and whether all analyses are enabled.
+
+---
+
+# Session information
+
+```{r session-info, eval=TRUE}
+sessionInfo()
+```

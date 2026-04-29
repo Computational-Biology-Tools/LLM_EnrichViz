@@ -1,0 +1,205 @@
+---
+title: "LLM_EnrichViz — Enrichment Analysis Report"
+date: "`r format(Sys.time(), '%B %d, %Y')`"
+output:
+  html_document:
+    theme: flatly
+    toc: true
+    toc_float: true
+    toc_depth: 3
+    code_folding: hide
+    self_contained: true
+params:
+  output_dir: "enrichviz_results"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE, warning = FALSE, message = FALSE,
+                      fig.align = "center")
+library(dplyr)
+library(ggplot2)
+library(knitr)
+library(kableExtra)
+
+od <- params$output_dir
+```
+
+# Overview
+
+This report summarises the multi-method gene set enrichment analysis
+performed by **LLM_EnrichViz**.  Each section presents the results of one
+method (ORA, GSEA, GSVA, ROAST) across the requested pathway databases,
+followed by the integrated LLM interpretation.
+
+---
+
+# Analysis Parameters
+
+```{r params-table}
+params_file <- file.path(od, "analysis_parameters.txt")
+if (file.exists(params_file)) {
+  param_lines <- readLines(params_file)
+  param_df    <- data.frame(Parameter = param_lines)
+  kable(param_df, caption = "Analysis parameters") %>%
+    kable_styling(bootstrap_options = c("striped","hover","condensed"),
+                  full_width = FALSE)
+} else {
+  cat("Parameter file not found.")
+}
+```
+
+---
+
+# ORA Results
+
+```{r ora-results}
+ora_files <- list.files(od, pattern = "^ORA_.*_results\\.txt$", full.names = TRUE)
+if (length(ora_files) > 0) {
+  for (f in ora_files) {
+    db_name <- gsub("ORA_|_results\\.txt", "", basename(f))
+    df      <- read.table(f, header = TRUE, sep = "\t", stringsAsFactors = FALSE,
+                          fill = TRUE, quote = "")
+    if (nrow(df) == 0) next
+    cat("##", db_name, "\n\n")
+    df_show <- head(df, 20)
+    print(kable(df_show, caption = paste("ORA —", db_name, "(top 20)")) %>%
+      kable_styling(bootstrap_options = c("striped","hover","condensed"),
+                    full_width = TRUE, font_size = 11))
+    cat("\n\n")
+  }
+} else {
+  cat("No ORA result files found.\n")
+}
+```
+
+```{r ora-plots, fig.width=10, fig.height=6}
+ora_plots <- list.files(od, pattern = "^ORA_.*_barplot\\.pdf$", full.names = TRUE)
+if (length(ora_plots) > 0) {
+  for (f in ora_plots) {
+    db_name <- gsub("ORA_|_barplot\\.pdf", "", basename(f))
+    cat("### Bar chart —", db_name, "\n\n")
+    knitr::include_graphics(f)
+    cat("\n\n")
+  }
+}
+```
+
+---
+
+# GSEA Results
+
+```{r gsea-results}
+gsea_files <- list.files(od, pattern = "^GSEA_.*_results\\.txt$", full.names = TRUE)
+if (length(gsea_files) > 0) {
+  for (f in gsea_files) {
+    db_name <- gsub("GSEA_|_results\\.txt", "", basename(f))
+    df      <- read.table(f, header = TRUE, sep = "\t", stringsAsFactors = FALSE,
+                          fill = TRUE, quote = "")
+    if (nrow(df) == 0) next
+    cat("##", db_name, "\n\n")
+    df_show <- head(df, 20)
+    print(kable(df_show, caption = paste("GSEA —", db_name, "(top 20)")) %>%
+      kable_styling(bootstrap_options = c("striped","hover","condensed"),
+                    full_width = TRUE, font_size = 11))
+    cat("\n\n")
+  }
+} else {
+  cat("No GSEA result files found.\n")
+}
+```
+
+---
+
+# GSVA Results
+
+```{r gsva-results}
+gsva_files <- list.files(od, pattern = "^GSVA_.*_summary\\.txt$", full.names = TRUE)
+if (length(gsva_files) > 0) {
+  for (f in gsva_files) {
+    db_name <- gsub("GSVA_|_summary\\.txt", "", basename(f))
+    df      <- read.table(f, header = TRUE, sep = "\t", stringsAsFactors = FALSE,
+                          fill = TRUE, quote = "")
+    if (nrow(df) == 0) next
+    cat("##", db_name, "\n\n")
+    df_show <- head(df, 20)
+    print(kable(df_show, caption = paste("GSVA —", db_name, "(top 20 |MeanScore|)")) %>%
+      kable_styling(bootstrap_options = c("striped","hover","condensed"),
+                    full_width = TRUE, font_size = 11))
+    cat("\n\n")
+  }
+} else {
+  cat("No GSVA result files found.\n")
+}
+```
+
+---
+
+# ROAST Results
+
+```{r roast-results}
+roast_files <- list.files(od, pattern = "^ROAST_.*_results\\.txt$", full.names = TRUE)
+if (length(roast_files) > 0) {
+  for (f in roast_files) {
+    db_name <- gsub("ROAST_|_results\\.txt", "", basename(f))
+    df      <- read.table(f, header = TRUE, sep = "\t", stringsAsFactors = FALSE,
+                          fill = TRUE, quote = "")
+    if (nrow(df) == 0) next
+    cat("##", db_name, "\n\n")
+    df_show <- head(df, 20)
+    print(kable(df_show, caption = paste("ROAST —", db_name, "(top 20)")) %>%
+      kable_styling(bootstrap_options = c("striped","hover","condensed"),
+                    full_width = TRUE, font_size = 11))
+    cat("\n\n")
+  }
+} else {
+  cat("No ROAST result files found.\n")
+}
+```
+
+---
+
+# Agent LLM Responses
+
+```{r agent-responses}
+agent_file <- file.path(od, "agent_responses.txt")
+if (file.exists(agent_file)) {
+  cat(readLines(agent_file), sep = "\n")
+} else {
+  cat("Agent response file not found.\n")
+}
+```
+
+---
+
+# Integrated LLM Analysis
+
+```{r final-response}
+final_file <- file.path(od, "final_response.txt")
+if (file.exists(final_file)) {
+  cat(readLines(final_file), sep = "\n")
+} else {
+  cat("Final response file not found.\n")
+}
+```
+
+---
+
+# Integrated Network
+
+```{r network, results='asis'}
+net_file <- file.path(od, "integrated_network.html")
+if (file.exists(net_file)) {
+  cat('<iframe src="integrated_network.html" width="100%" height="720px"',
+      'style="border:none;"></iframe>\n')
+} else {
+  cat("Network file not found.\n")
+}
+```
+
+---
+
+# Session Information
+
+```{r session-info}
+sessionInfo()
+```
